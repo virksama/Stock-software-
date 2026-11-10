@@ -48,3 +48,80 @@ st.write('1. Verify real-time stocks AND OPRA options data, including API licens
 st.write('2. Add options contract screening and intraday session VWAP.')
 st.write('3. Deploy on a cloud host and connect an iPhone notification channel.')
 st.write('4. Backtest, then paper-test alerts before considering real trades.')
+
+# 5-minute intraday research scanner
+st.subheader("5-Minute Intraday Scanner")
+st.caption("Yahoo Finance data may be delayed or unavailable. Not live trading signals.")
+
+@st.cache_data(ttl=300)
+def intraday_scan(symbol):
+    df = yf.download(
+        symbol, period="5d", interval="5m",
+        auto_adjust=True, progress=False
+    )
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    if df.empty or len(df) < 30:
+        return {"Symbol": symbol, "Status": "No data"}
+
+    close = df["Close"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
+
+    ema9 = close.ewm(span=9, adjust=False).mean()
+    ema21 = close.ewm(span=21, adjust=False).mean()
+
+    change = close.diff()
+    gain = change.clip(lower=0).ewm(
+        alpha=1/14, adjust=False
+    ).mean()
+    loss = (-change.clip(upper=0)).ewm(
+        alpha=1/14, adjust=False
+    ).mean()
+    rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] > 0 else float("inf")
+    rsi = 100 - 100 / (1 + rs)
+
+    typical = (high + low + close) / 3
+    session = df.index.tz_convert(
+        "America/New_York"
+    ).date if df.index.tz is not None else df.index.date
+    session_key = pd.Series(session, index=df.index)
+    vwap = (typical * volume).groupby(
+        session_key
+    ).cumsum() / volume.groupby(
+        session_key
+    ).cumsum().replace(0, float("nan"))
+
+    trend = "Bullish" if ema9.iloc[-1] > ema21.iloc[-1] else "Bearish"
+
+    return {
+        "Symbol": symbol,
+        "Price": round(float(close.iloc[-1]), 2),
+        "EMA 9": round(float(ema9.iloc[-1]), 2),
+        "EMA 21": round(float(ema21.iloc[-1]), 2),
+        "RSI": round(float(rsi), 1),
+        "VWAP": round(float(vwap.iloc[-1]), 2),
+        "Trend": trend,
+        "Last bar": str(df.index[-1])
+    }
+
+if st.button("Refresh 5-minute scanner"):
+    intraday_scan.clear()
+
+intraday_rows = []
+with st.spinner("Scanning 5-minute bars..."):
+    for symbol in SYMBOLS:
+        try:
+            intraday_rows.append(intraday_scan(symbol))
+        except Exception as e:
+            intraday_rows.append({
+                "Symbol": symbol,
+                "Status": "Data unavailable"
+            })
+
+st.dataframe(
+    pd.DataFrame(intraday_rows),
+    hide_index=True,
+    use_container_width=True
+)
