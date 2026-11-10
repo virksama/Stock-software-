@@ -125,3 +125,46 @@ st.dataframe(
     hide_index=True,
     use_container_width=True
 )
+# Stock signal alerts - research only
+st.subheader("Stock Buy/Sell Signal Alerts")
+st.caption("Signals use delayed 5-minute data. Not trade advice.")
+
+def stock_alert(row):
+    try:
+        price = float(row["Price"])
+        ema9 = float(row["EMA 9"])
+        ema21 = float(row["EMA 21"])
+        rsi = float(row["RSI"])
+        vwap = float(row["VWAP"])
+
+        if not all(pd.notna(x) for x in
+                   [price, ema9, ema21, rsi, vwap]):
+            return "DATA UNAVAILABLE"
+
+        if (ema9 > ema21 and price > vwap
+                and 45 <= rsi <= 70):
+            return "BUY WATCH"
+
+        if (ema9 < ema21 and price < vwap
+                and 30 <= rsi <= 55):
+            return "SELL WATCH"
+
+        return "WAIT"
+    except (KeyError, TypeError, ValueError):
+        return "DATA UNAVAILABLE"
+
+alerts_df = pd.DataFrame(intraday_rows)
+alerts_df["Alert"] = alerts_df.apply(
+    stock_alert, axis=1
+)
+
+st.dataframe(
+    alerts_df[["Symbol", "Alert", "Price",
+               "RSI", "VWAP", "Trend"]],
+    hide_index=True,
+    use_container_width=True
+)
+
+st.info("These are research watch signals, not orders. "
+        "Confirm market data and risk before trading.")
+
